@@ -1,0 +1,66 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ECS Fargate with ECR - CloudFormation Template'
+
+Parameters:
+  ContainerPort:
+    Type: Number
+    Default: 80
+    Description: 'Port on which the container runs'
+  DesiredCount:
+    Type: Number
+    Default: 1
+    Description: 'Number of tasks to run'
+
+Resources:
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: Kurasawa_Test_Cluster
+
+  ECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: Kurasawa_Test_Fargate
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: '256'
+      Memory: '512'
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !Ref ECSServiceRole
+      ContainerDefinitions:
+        - Name: MyContainer
+          Image: 050451386795.dkr.ecr.ap-southeast-2.amazonaws.com/kurasawa_app:latest
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+          Essential: true
+
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref ECSCluster
+      LaunchType: FARGATE
+      DesiredCount: !Ref DesiredCount
+      TaskDefinition: Kurasawa_Test_Fargate:3
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - subnet-0dc81adc379b90e96
+            - subnet-092f3ee4fdfe98a43
+            - subnet-00eee7b8daf6bc92d
+          SecurityGroups:
+            - sg-035c51aec8dd37723
+
+  ECSServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AWSServiceRoleForECS
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs.amazonaws.com
+            Action:
+              - sts:AssumeRole

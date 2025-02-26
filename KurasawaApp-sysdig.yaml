@@ -1,0 +1,66 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: The template used to create an ECS Service from the ECS Console.
+
+Transform: 
+  - SysdigMacro
+    
+Parameters:
+  ECSClusterName:
+    Type: String
+    Default: Kurasawa_Test_Cluster
+  ECSServiceName:
+    Type: String
+    Default: Kurasawa_App_Fargate_sysdig
+  SecurityGroupIDs:
+    Type: CommaDelimitedList
+    Default: sg-035c51aec8dd37723
+  SubnetIDs:
+    Type: CommaDelimitedList
+    Default: subnet-0dc81adc379b90e96,subnet-092f3ee4fdfe98a43,subnet-00eee7b8daf6bc92d
+  VpcID:
+    Type: String
+    Default: vpc-029a04b686e0f7526
+  LoadBalancerName:
+    Type: String
+    Default: ''
+Resources:
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: Kurasawa_Test_Cluster
+      TaskDefinition: arn:aws:ecs:ap-southeast-2:050451386795:task-definition/Kurasawa_Test_Fargate:4
+      LaunchType: FARGATE
+      ServiceName: Kurasawa_App_Fargate_sysdig
+      SchedulingStrategy: REPLICA
+      DesiredCount: 1
+      AvailabilityZoneRebalancing: ENABLED
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            Ref: SecurityGroupIDs
+          Subnets:
+            Ref: SubnetIDs
+      PlatformVersion: LATEST
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      DeploymentController:
+        Type: ECS
+      ServiceConnectConfiguration:
+        Enabled: false
+      Tags: []
+      EnableECSManagedTags: true
+Outputs:
+  ClusterName:
+    Description: The cluster used to create the service.
+    Value:
+      Ref: ECSClusterName
+  ECSService:
+    Description: The created service.
+    Value:
+      Ref: ECSService

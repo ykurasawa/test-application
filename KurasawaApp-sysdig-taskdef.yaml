@@ -1,0 +1,103 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: The template used to create an ECS Service from the ECS Console.
+
+Transform: 
+  - SysdigMacro
+
+Parameters:
+  ECSClusterName:
+    Type: String
+    Default: Kurasawa_Test_Cluster
+  ECSServiceName:
+    Type: String
+    Default: Kurasawa_App_Fargate_sysdig
+  SecurityGroupIDs:
+    Type: CommaDelimitedList
+    Default: sg-035c51aec8dd37723
+  SubnetIDs:
+    Type: CommaDelimitedList
+    Default: subnet-0dc81adc379b90e96,subnet-092f3ee4fdfe98a43,subnet-00eee7b8daf6bc92d
+  VpcID:
+    Type: String
+    Default: vpc-029a04b686e0f7526
+  LoadBalancerName:
+    Type: String
+    Default: ''
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/Kurasawa_Fargate_Sysdig
+      RetentionInDays: 30
+
+  ECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: Kurasawa_Fargate_Sysdig
+      ExecutionRoleArn: arn:aws:iam::050451386795:role/ecsTaskExecutionRole
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: "2048"
+      Memory: "4096"
+      ContainerDefinitions:
+        - Name: MyFargateContainer
+          Image: 050451386795.dkr.ecr.ap-southeast-2.amazonaws.com/kurasawa_app
+          Cpu: 2048
+          PortMappings:
+            - ContainerPort: 80
+              HostPort: 80
+              Protocol: tcp
+          Essential: true
+          EntryPoint:
+            - /docker-entrypoint.sh
+          Command:
+            - nginx
+            - "-g"
+            - "daemon off;"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: ap-southeast-2
+              awslogs-stream-prefix: ecs
+              awslogs-create-group: "true"
+              
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref ECSClusterName
+      TaskDefinition: !Ref ECSTaskDefinition
+      LaunchType: FARGATE
+      ServiceName: !Ref ECSServiceName
+      SchedulingStrategy: REPLICA
+      DesiredCount: 1
+      AvailabilityZoneRebalancing: ENABLED
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups: !Ref SecurityGroupIDs
+          Subnets: !Ref SubnetIDs
+      PlatformVersion: LATEST
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      DeploymentController:
+        Type: ECS
+      ServiceConnectConfiguration:
+        Enabled: false
+      Tags: []
+      EnableECSManagedTags: true
+
+Outputs:
+  ClusterName:
+    Description: The cluster used to create the service.
+    Value: !Ref ECSClusterName
+  ECSService:
+    Description: The created service.
+    Value: !Ref ECSService

@@ -1,0 +1,125 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+ VpcId:
+   Type: AWS::EC2::VPC::Id
+ ProtectedSubnets:
+   Type: List<AWS::EC2::Subnet::Id>
+ TaskCpu:
+   Type: Number
+   Default: 256
+ TaskMemory:
+   Type: Number
+   Default: 512
+ DesiredCount:
+   Type: Number
+   Default: 1
+
+Transform: 
+  - SysdigMacro
+
+Resources: 
+ SecurityGroup:
+   Type: AWS::EC2::SecurityGroup
+   Properties:
+     GroupName: event-generator
+     GroupDescription: Security group for the service
+     VpcId: !Ref VpcId
+
+ SecurityGroupIngress:
+   Type: AWS::EC2::SecurityGroupIngress
+   Properties:
+     GroupId: !Ref SecurityGroup
+     IpProtocol: -1
+     SourceSecurityGroupId: !Ref SecurityGroup
+
+ Cluster:
+   Type: AWS::ECS::Cluster
+   Properties:
+     ClusterName: sysdig-event-generator
+
+ LogGroup:
+   Type: AWS::Logs::LogGroup
+   Properties:
+     LogGroupName: /ecs/event-generator
+
+ EcsTaskRole:
+   Type: AWS::IAM::Role
+   Properties:
+     AssumeRolePolicyDocument:
+       Version: 2012-10-17
+       Statement:
+         - Effect: Allow
+           Principal:
+             Service:
+               - ecs-tasks.amazonaws.com
+               - events.amazonaws.com
+           Action:
+             - sts:AssumeRole
+     ManagedPolicyArns:
+       - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceEventsRole
+     RoleName: task-role-for-event-generator
+
+ EcsTaskRolePolicy:
+   Type: AWS::IAM::Policy
+   Properties:
+     PolicyName: task-role-policy-for-event-generator
+     PolicyDocument:
+       Version: 2012-10-17
+       Statement:
+         - Effect: Allow
+           Action: 
+             - ssmmessages:CreateControlChannel
+             - ssmmessages:CreateDataChannel
+             - ssmmessages:OpenControlChannel
+             - ssmmessages:OpenDataChannel
+           Resource: '*'
+     Roles:
+       - Ref: EcsTaskRole
+
+ TaskDefinition:
+   Type: AWS::ECS::TaskDefinition
+   Properties:
+     Family: event-generator
+     RequiresCompatibilities:
+       - FARGATE
+     Cpu: !Ref TaskCpu
+     Memory: !Ref TaskMemory
+     NetworkMode: awsvpc
+     ExecutionRoleArn: ecsTaskExecutionRole
+     TaskRoleArn: !GetAtt EcsTaskRole.Arn
+     ContainerDefinitions:
+       - Name: event-generator
+         Image: 050451386795.dkr.ecr.ap-southeast-2.amazonaws.com/falcosecurity/event-generator:latest
+         EntryPoint: 
+           - "/bin/event-generator"
+         Command: 
+           - "run"
+           - "syscall"
+           - "--loop"
+         LogConfiguration:
+           LogDriver: awslogs
+           Options:
+             awslogs-region: !Ref 'AWS::Region'
+             awslogs-group: !Ref LogGroup
+             awslogs-stream-prefix: app
+         Essential: true
+
+ Service:
+   Type: AWS::ECS::Service
+   Properties:
+     Cluster: !Ref Cluster
+     EnableExecuteCommand: true
+     DeploymentConfiguration:
+       MaximumPercent: 200
+       MinimumHealthyPercent: 100
+     DesiredCount: !Ref DesiredCount
+     LaunchType: FARGATE
+     NetworkConfiguration:
+       AwsvpcConfiguration:
+         AssignPublicIp: DISABLED 
+         SecurityGroups:
+           - !Ref SecurityGroup
+         Subnets: !Ref ProtectedSubnets
+     ServiceName: event-generator-service
+     TaskDefinition: !Ref TaskDefinition
