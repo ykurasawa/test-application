@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: event-generator
+spec:
+  selector:
+    matchLabels:
+      app: event-generator
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: event-generator
+    spec:
+      containers:
+      - name: event-generator 
+        image: 050451386795.dkr.ecr.ap-southeast-2.amazonaws.com/falcosecurity/event-generator:latest
+        imagePullPolicy: Always
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+        command:
+          - "event-generator"
+        args:
+          - "run"
+          - "all"
+          - "--sleep"
+          - "5m"
+          - "--loop"
