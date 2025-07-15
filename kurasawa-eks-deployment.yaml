@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kurasawa-eks
+spec:
+  selector:
+    matchLabels:
+      app: kurasawa-eks
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: kurasawa-eks
+    spec:
+      containers:
+      - name: kurasawa-eks
+        image: 050451386795.dkr.ecr.ap-southeast-2.amazonaws.com/kurasawa_app:2.0 
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 80
