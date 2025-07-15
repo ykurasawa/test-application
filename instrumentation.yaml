@@ -1,0 +1,240 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: Sysdig Serverless Instrumentation Stack (5.3.1 rev 0996a8e)
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: Collector Settings
+      Parameters:
+        - SysdigCollectorHost
+        - SysdigCollectorPort
+        - SysdigAccessKey
+    - Label:
+        default: Instrumentation Settings
+      Parameters:
+        - Architecture
+        - SysdigMacroName
+        - SysdigInstrumentationLogLevel
+        - SysdigServerlessPatcherImage
+        - SysdigWorkloadAgentImage
+    - Label:
+        default: Instrumentation Resource Allocation
+      Parameters:
+        - SysdigPriority
+        - SysdigSidecarEssential
+        - SysdigSidecarCpu
+        - SysdigSidecarMemoryLimit
+        - SysdigSidecarMemoryReservation
+    ParameterLabels:
+      # Collector Settings
+      SysdigCollectorHost:
+        default: Sysdig Collector Host
+      SysdigCollectorPort:
+        default: Sysdig Collector Port
+      SysdigAccessKey:
+        default: Sysdig Access Key
+      # Instrumentation Settings
+      Architecture:
+        default: Architecture
+      SysdigMacroName:
+        default: Macro Name
+      SysdigInstrumentationLogLevel:
+        default: Sysdig Instrumentation Logging Level
+      SysdigServerlessPatcherImage:
+        default: Sysdig Serverless Patcher Image
+      SysdigWorkloadAgentImage:
+        default: Sysdig Workload Agent Image
+      # Instrumentation Resource Allocation
+      SysdigPriority:
+        default: Instrumentation priority
+      SysdigSidecarEssential:
+        default: Sidecar Essential Flag
+      SysdigSidecarCpu:
+        default: Sidecar CPU Units
+      SysdigSidecarMemoryLimit:
+        default: Sidecar Memory Limit
+      SysdigSidecarMemoryReservation:
+        default: Sidecar Memory Reservation
+
+Parameters:
+  # Collector Settings
+  SysdigCollectorHost:
+    Type: String
+
+  SysdigCollectorPort:
+    Type: String
+    Default: "6443"
+    AllowedPattern: ^[0-9]+$
+    ConstraintDescription: Sysdig Collector Port can include only numbers
+
+  SysdigAccessKey:
+    Type: String
+
+  # Instrumentation Settings
+  Architecture:
+    Type: String
+    Description: The instruction set architecture that the function supports
+    Default: x86_64
+    AllowedValues:
+      - x86_64
+      - arm64
+
+  SysdigMacroName:
+    Type: String
+    Description: Must be unique within your account
+    AllowedPattern: ^[A-Za-z0-9]+$
+    Default: "SysdigMacro"
+    ConstraintDescription: Macro Name can include only letters and numbers
+
+  SysdigInstrumentationLogLevel:
+    Type: String
+    Default: "info"
+    AllowedValues:
+      - "silent"
+      - "error"
+      - "warning"
+      - "info"
+      - "debug"
+      - "trace"
+
+  SysdigServerlessPatcherImage:
+    Type: String
+    Description: Will patch your template to install the Sysdig Workload Agent - Must be hosted on an ECR private registry
+    Default: "quay.io/sysdig/serverless-patcher:5.3.1"
+
+  SysdigWorkloadAgentImage:
+    Type: String
+    Description: The Sysdig Agent that will secure your workload
+    Default: "quay.io/sysdig/workload-agent:5.3.1"
+
+  SysdigPriority:
+    Type: String
+    Description: "Instrumentation priority. If set to security, the instrumentation will prevent an unsecured workload from running."
+    Default: "availability"
+    AllowedValues:
+      - "security"
+      - "availability"
+
+  SysdigSidecarEssential:
+    Type: String
+    Description: "If true, the sidecar container will be marked as essential. If false, the sidecar container will be marked as non-essential. If set to auto, will follow the selected priority (true for security, false for availability)"
+    Default: "auto"
+    AllowedValues:
+      - "auto"
+      - "true"
+      - "false"
+
+  SysdigSidecarCpu:
+    Type: String
+    Description: "The number of cpu units to reserve for the sidecar container. This is optional, but if specified, it must be a positive integer."
+    Default: ""
+    AllowedPattern: ^[0-9]*$
+    ConstraintDescription: Sidecar CPU can include only numbers
+
+  SysdigSidecarMemoryLimit:
+    Type: String
+    Description: "The amount of memory (in MiB) to limit the sidecar container to. This is optional, but if specified, it must be a positive integer."
+    Default: ""
+    AllowedPattern: ^[0-9]*$
+    ConstraintDescription: Sidecar Memory Limit can include only numbers
+
+  SysdigSidecarMemoryReservation:
+    Type: String
+    Description: "The amount of memory (in MiB) to reserve for the sidecar container. This is optional, but if specified, it must be a positive integer."
+    Default: ""
+    AllowedPattern: ^[0-9]*$
+    ConstraintDescription: Sidecar Memory Reservation can include only numbers
+
+Mappings:
+  Sysdig:
+    Agent:
+      NiceValueIncrement: ""
+      SidecarMode: ""
+  Kilt:
+    Mode:
+      OptIn: ""
+    Customization:
+      Definition: ""
+      DefinitionType: ""
+      RecipeConfiguration: ""
+
+Conditions:
+  IsKiltModeOptIn: !Equals [!FindInMap [Kilt, Mode, OptIn], "true"]
+  IsKiltCustomDefinition: !And
+    - !Not [!Equals [!FindInMap [Kilt, Customization, Definition], ""]]
+    - !Not [!Equals [!FindInMap [Kilt, Customization, DefinitionType], ""]]
+  IsKiltCustomRecipeConfiguration: !Not [ !Equals [!FindInMap [Kilt, Customization, RecipeConfiguration], ""]]
+  DoSetNiceValueIncrement: !Not [ !Equals [!FindInMap [Sysdig, Agent, NiceValueIncrement], ""]]
+  DoSetSidecarMode: !Not [ !Equals [!FindInMap [Sysdig, Agent, SidecarMode], ""]]
+  IsSidecarEssentialAuto: !Equals [!Ref SysdigSidecarEssential, "auto"]
+  IsPrioritySecurity: !Equals [!Ref SysdigPriority, "security"]
+
+Outputs:
+  SysdigTransformationMacro:
+    Description: Add this transformation macro at the root level of your template
+    Value: !Sub 'Transform: ["${SysdigMacroName}"]'
+
+Resources:
+  SysdigLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 365
+
+  ServerlessPatcherRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+
+  ServerlessPatcherLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Architectures:
+        - !Ref Architecture
+      PackageType: Image
+      Role: !GetAtt ServerlessPatcherRole.Arn
+      Code:
+        ImageUri: !Ref SysdigServerlessPatcherImage
+      Environment:
+        Variables:
+          # Sysdig Collector
+          SYSDIG_COLLECTOR_HOST: !Ref SysdigCollectorHost
+          SYSDIG_COLLECTOR_PORT: !Ref SysdigCollectorPort
+          SYSDIG_ACCESS_KEY: !Ref SysdigAccessKey
+          # Sysdig Instrumentation
+          SYSDIG_WORKLOAD_AGENT_IMAGE: !Ref SysdigWorkloadAgentImage
+          SYSDIG_LOGGING: !Ref SysdigInstrumentationLogLevel
+          SYSDIG_PRIORITY: !Ref SysdigPriority
+          KILT_LOG_GROUP: !Ref SysdigLogGroup
+          # Sysdig Agent Nice Value Increment
+          SYSDIG_AGENT_NICE_VALUE_INCREMENT: !If [DoSetNiceValueIncrement, !FindInMap [Sysdig, Agent, NiceValueIncrement], !Ref AWS::NoValue]
+          # Sidecar mode
+          SYSDIG_SIDECAR_MODE: !If [DoSetSidecarMode, !FindInMap [Sysdig, Agent, SidecarMode], "auto"]
+          # Kilt OptIn Mode
+          KILT_OPT_IN: !If [IsKiltModeOptIn, "YES", !Ref AWS::NoValue]
+          # Kilt Definition/Recipe Customization
+          KILT_DEFINITION: !If [IsKiltCustomDefinition, !FindInMap [Kilt, Customization, Definition], !Ref AWS::NoValue]
+          KILT_DEFINITION_TYPE: !If [IsKiltCustomDefinition, !FindInMap [Kilt, Customization, DefinitionType], !Ref AWS::NoValue]
+          KILT_RECIPE_CONFIG: !If [IsKiltCustomRecipeConfiguration, !FindInMap [Kilt, Customization, RecipeConfiguration], !Ref AWS::NoValue]
+          KILT_SIDECAR_ESSENTIAL: !If [ IsSidecarEssentialAuto, !If [ IsPrioritySecurity, "true", "false"], !Ref SysdigSidecarEssential ]
+          KILT_SIDECAR_CPU: !Ref SysdigSidecarCpu
+          KILT_SIDECAR_MEMORY_LIMIT: !Ref SysdigSidecarMemoryLimit
+          KILT_SIDECAR_MEMORY_RESERVATION: !Ref SysdigSidecarMemoryReservation
+
+  ServerlessPatcherMacro:
+    Type: AWS::CloudFormation::Macro
+    Properties:
+      Name: !Ref SysdigMacroName
+      Description: Applies Sysdig instrumentation to Fargate ECS Tasks
+      FunctionName: !GetAtt ServerlessPatcherLambda.Arn

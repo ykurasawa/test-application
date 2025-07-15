@@ -4,7 +4,7 @@ provider "aws" {
   secret_key = "hardcoded-secret-key"
 }
 
-resource "aws_instance" "example" {
+resource "aws_instance" "example3" {
   ami           = "ami-12345678"
   instance_type = "t2.micro"
 
@@ -26,12 +26,6 @@ resource "aws_security_group" "allow_all" {
     cidr_blocks = ["0.0.0.0/0"]  # すべてのIPにSSHを開放（NG）
   }
 
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]  # すべてのIPにHTTPを開放（NG）
-  }
 
   egress {
     from_port   = 0
@@ -42,7 +36,7 @@ resource "aws_security_group" "allow_all" {
 }
 
 resource "aws_s3_bucket" "unsecured_bucket" {
-  bucket = "my-insecure-bucket"
+  bucket = "my-insecure-bucket3"
   acl    = "public-read"  # 誰でも読み取り可能（NG）
 
   # サーバーサイド暗号化なし（NG）
