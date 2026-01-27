@@ -2,7 +2,7 @@ name: Sysdig Secure Inline Scan
 
 on: [push, pull_request]
 
-# Securityタブへのアクセス権限をトップレベルで定義
+# Securityタブへの報告権限を明示
 permissions:
   contents: read
   security-events: write
@@ -23,14 +23,13 @@ jobs:
           sysdig-secure-token: ${{ secrets.SYSDIG_SECURE_TOKEN }}
           sysdig-secure-url: ${{ secrets.SYSDIG_SECURE_URL }}
           image-tag: "my-repo/my-image:latest"
-          # ▼【修正】ログの「有効なリスト」に基づき、追加引数としてSARIF出力を指定
+          # ▼【修正】画像3e9652の警告に基づき、CLI引数としてSARIF出力を指定します
           extra-parameters: --output-format=sarif --output-path=sysdig-results.sarif
-          # ▼【修正】脆弱性があってもエラーにせず続行させるための正しい設定項目
+          # ▼【修正】脆弱性が見つかっても処理を止めず、レポート送信へ進ませる設定
           stop-on-failed-policy-eval: false
 
       - name: Upload SARIF report
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: always() # スキャンで問題が見つかっても必ず実行
         with:
-          # パスは Sysdig Action の出力と一致させる
           sarif_file: sysdig-results.sarif
