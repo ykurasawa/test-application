@@ -2,11 +2,9 @@ name: Sysdig Secure Inline Scan
 
 on: [push, pull_request]
 
-# ▼ jobsと同じ階層（一番左）に正確に配置してください
 permissions:
   contents: read
   security-events: write
-  actions: read
 
 jobs:
   build-and-scan:
@@ -16,23 +14,20 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build Docker image
-        # Dockerfileへのリネームが完了しているので、ここは成功するはずです
+        # image_3efed3.png で修正した通り、Dockerfileの名前は大文字です
         run: docker build -t my-repo/my-image:latest .
 
       - name: Sysdig Secure Inline Scan
-        id: scan
         uses: sysdiglabs/scan-action@v5
         with:
           sysdig-secure-token: ${{ secrets.SYSDIG_SECURE_TOKEN }}
           sysdig-secure-url: ${{ secrets.SYSDIG_SECURE_URL }}
           image-tag: "my-repo/my-image:latest"
-          # 脆弱性があった時にジョブを失敗させるかどうか（false = 止めない）
+          # ▼ スキャナーを正常起動させ、表とSARIFを両方出力させるための「新エンジン」用設定
           stop-on-failed-policy-eval: false
-          # ▼ スキャナーを正しく起動させ、SARIFを出力させる唯一の書き方
           extra-parameters: --output-format=sarif --output-path=sysdig-results.sarif
 
       - name: Upload SARIF report
-        # 最新の v3 を使用します
         uses: github/codeql-action/upload-sarif@v3
         # スキャンの成否に関わらず、ファイルがあれば必ず実行
         if: always()
