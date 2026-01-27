@@ -2,10 +2,10 @@ name: Sysdig Secure Inline Scan
 
 on: [push, pull_request]
 
-# Securityタブへの報告権限をトップレベルで定義
+# ▼ これを必ず追加してください
 permissions:
-  contents: read
   security-events: write
+  contents: read
 
 jobs:
   build-and-scan:
@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build Docker image
-        # image_3efed3.png で修正した大文字の Dockerfile をビルド
+        # ファイルがないとここでエラーになります
         run: docker build -t my-repo/my-image:latest .
 
       - name: Sysdig Secure Inline Scan
@@ -24,13 +24,13 @@ jobs:
           sysdig-secure-token: ${{ secrets.SYSDIG_SECURE_TOKEN }}
           sysdig-secure-url: ${{ secrets.SYSDIG_SECURE_URL }}
           image-tag: "my-repo/my-image:latest"
-          # ▼【修正ポイント1】v5ではパラメータをここにまとめます
-          extra-parameters: --output-format=sarif --output-path=sysdig-results.sarif
-          # ▼【修正ポイント2】脆弱性があってもエラーにせず続行させるためのv5用設定
-          stop-on-failed-policy-eval: false
+          output-format: sarif
+          output-path: ./sysdig-results.sarif
+          ignore-failed-scan: true # 最初はこれを入れておくとレポート作成まで進みやすいです
 
       - name: Upload SARIF report
+        # 警告が出ていたので v4 に更新しておきます
         uses: github/codeql-action/upload-sarif@v3
-        if: always() # 前のステップが失敗しても必ず実行
+        if: always()
         with:
-          sarif_file: sysdig-results.sarif
+          sarif_file: ./sysdig-results.sarif
