@@ -2,6 +2,7 @@ name: Sysdig Secure Inline Scan
 
 on: [push, pull_request]
 
+# Securityタブへの報告権限（これは今の設定で合っています）
 permissions:
   contents: read
   security-events: write
@@ -14,6 +15,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build Docker image
+        # image_3efed3.png で大文字に直したDockerfileをビルド
         run: docker build -t my-repo/my-image:latest .
 
       - name: Sysdig Secure Inline Scan
@@ -22,13 +24,14 @@ jobs:
           sysdig-secure-token: ${{ secrets.SYSDIG_SECURE_TOKEN }}
           sysdig-secure-url: ${{ secrets.SYSDIG_SECURE_URL }}
           image-tag: "my-repo/my-image:latest"
-          # ▼【ここが最重要】v5ではパラメータをここにまとめないと無視されます
-          extra-parameters: --output-format=sarif --output-path=sysdig-results.sarif
-          # ▼ 脆弱性が見つかってもビルドを止めずに、レポート送信を優先させる設定
+          # ▼【ここが最大の修正点】
+          # v5では以下の2つの項目名以外は受け付けられません
           stop-on-failed-policy-eval: false
+          extra-parameters: --output-format=sarif --output-path=sysdig-results.sarif
 
       - name: Upload SARIF report
         uses: github/codeql-action/upload-sarif@v3
-        if: always() # 前のステップが失敗（脆弱性発見）しても必ず実行
+        # 前のステップで脆弱性が見つかっても、必ず実行
+        if: always()
         with:
           sarif_file: sysdig-results.sarif
