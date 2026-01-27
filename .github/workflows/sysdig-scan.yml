@@ -2,10 +2,11 @@ name: Sysdig Secure Inline Scan
 
 on: [push, pull_request]
 
-# ▼ ワークフロー自体に「Securityタブへの書き込み」を許可させます
+# ▼ jobsと同じ階層（一番左）に正確に配置してください
 permissions:
   contents: read
   security-events: write
+  actions: read
 
 jobs:
   build-and-scan:
@@ -15,23 +16,26 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build Docker image
-        # ファイル名を Dockerfile に直したので、ここはもう成功します
+        # Dockerfileへのリネームが完了しているので、ここは成功するはずです
         run: docker build -t my-repo/my-image:latest .
 
       - name: Sysdig Secure Inline Scan
+        id: scan
         uses: sysdiglabs/scan-action@v5
         with:
           sysdig-secure-token: ${{ secrets.SYSDIG_SECURE_TOKEN }}
           sysdig-secure-url: ${{ secrets.SYSDIG_SECURE_URL }}
           image-tag: "my-repo/my-image:latest"
+          # ファイル名を ./ なしのシンプルな名前に固定します
           output-format: sarif
           output-path: sysdig-results.sarif
-          # 脆弱性が見つかっても「失敗」とせず、レポート転送を優先させる設定
+          # 脆弱性があってもエラーにせず、報告書の送信を優先させます
           ignore-failed-scan: true
 
       - name: Upload SARIF report
+        # 最新の v3 を使用します
         uses: github/codeql-action/upload-sarif@v3
-        # 前のステップの結果に関わらず、必ず実行します
+        # スキャンの成否に関わらず、ファイルがあれば必ず実行
         if: always()
         with:
           sarif_file: sysdig-results.sarif
