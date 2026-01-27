@@ -2,7 +2,7 @@ name: Sysdig Secure Inline Scan
 
 on: [push, pull_request]
 
-# Securityタブへの書き込み権限を明示的に許可する
+# Securityタブへの書き込み権限を付与（重要！）
 permissions:
   contents: read
   security-events: write
@@ -14,10 +14,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # エラー箇所：Dockerfileがカレントディレクトリにあることを確認してください
       - name: Build Docker image
-        run: |
-          docker build -t my-repo/my-image:latest .
+        run: docker build -t my-repo/my-image:latest .
 
       - name: Sysdig Secure Inline Scan
         uses: sysdiglabs/scan-action@v5
@@ -27,11 +25,13 @@ jobs:
           image-tag: "my-repo/my-image:latest"
           output-format: sarif
           output-path: ./sysdig-results.sarif
-          ignore-failed-scan: true # テスト時は一旦trueにしておくと後続のアップロードまで進みやすいです
+          # スキャンで脆弱性が見つかっても、一旦このステップを正常終了させて
+          # 後続のレポートアップロードを確実に実行させる設定
+          ignore-failed-scan: true 
 
       - name: Upload SARIF report
-        # 警告が出ていたので v3 に更新（最新はv3ですが、今後のために公式推奨へ）
+        # v3を使用（警告に出ていたデプロイメント対応）
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: always() # 前のステップが失敗しても必ず実行
         with:
           sarif_file: ./sysdig-results.sarif
