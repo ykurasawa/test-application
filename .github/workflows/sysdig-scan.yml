@@ -2,7 +2,6 @@ name: Sysdig Secure Inline Scan
 
 on: [push, pull_request]
 
-# Securityタブへの報告権限
 permissions:
   contents: read
   security-events: write
@@ -15,7 +14,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build Docker image
-        # image_3efed3.png で修正された Dockerfile を使用します
         run: docker build -t my-repo/my-image:latest .
 
       - name: Sysdig Secure Inline Scan
@@ -24,14 +22,13 @@ jobs:
           sysdig-secure-token: ${{ secrets.SYSDIG_SECURE_TOKEN }}
           sysdig-secure-url: ${{ secrets.SYSDIG_SECURE_URL }}
           image-tag: "my-repo/my-image:latest"
-          # ▼【修正】画像3e9652の警告に基づき、CLI引数としてSARIF出力を指定します
+          # ▼【ここが最重要】v5ではパラメータをここにまとめないと無視されます
           extra-parameters: --output-format=sarif --output-path=sysdig-results.sarif
-          # ▼【修正】脆弱性が見つかっても処理を止めず、レポート送信へ進ませるための正しい設定
+          # ▼ 脆弱性が見つかってもビルドを止めずに、レポート送信を優先させる設定
           stop-on-failed-policy-eval: false
 
       - name: Upload SARIF report
-        # v3を使用（image_3f8635.png の警告に対応）
         uses: github/codeql-action/upload-sarif@v3
-        if: always() # スキャンの成否に関わらず実行
+        if: always() # 前のステップが失敗（脆弱性発見）しても必ず実行
         with:
           sarif_file: sysdig-results.sarif
