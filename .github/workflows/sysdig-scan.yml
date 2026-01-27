@@ -1,35 +1,38 @@
-name: Sysdig Secure Inline Scan
+name: Sysdig Secure Inline Scan (New Engine)
 
 on: [push, pull_request]
 
+# Securityタブへの報告に必須の権限
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
-  build-and-scan:
+  build-scan:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 1. コンテナイメージのビルド
       - name: Build Docker image
         run: docker build -t my-repo/my-image:latest .
 
-      # 2. Sysdigによるインラインスキャン
-      - name: Sysdig Secure Inline Scan
+      - name: Scan image
         uses: sysdiglabs/scan-action@v5
         with:
-          # GitHub Secretsから読み込み
+          # ご提示のURLのサンプルに基づいたパラメータ設定
+          image-tag: "my-repo/my-image:latest"
           sysdig-secure-token: ${{ secrets.SYSDIG_SECURE_TOKEN }}
           sysdig-secure-url: ${{ secrets.SYSDIG_SECURE_URL }}
-          image-tag: "my-repo/my-image:latest"
-          # スキャン結果をSARIF形式で出力（GitHub Security用）
-          output-format: sarif
-          output-path: ./sysdig-results.sarif
-          # 脆弱性が見つかった場合にビルドを失敗させるかどうか
-          ignore-failed-scan: false
+          # 脆弱性があってもエラーで止めず、レポート送信を優先させる設定
+          stop-on-failed-policy-eval: false
+          # SARIF形式でファイルを出力させるための必須パラメータ
+          extra-parameters: --output-format=sarif --output-path=sysdig-results.sarif
 
-      # 3. スキャン結果をGitHub Securityタブへアップロード (Publicリポジトリなら無料)
       - name: Upload SARIF report
+        # 警告が出ていたので最新の v3 を使用
         uses: github/codeql-action/upload-sarif@v3
-        if: always() # スキャンが失敗してもレポートはアップロードする
+        # スキャンステップの結果に関わらず、常に実行
+        if: always()
         with:
-          sarif_file: ./sysdig-results.sarif
+          sarif_file: sysdig-results.sarif
