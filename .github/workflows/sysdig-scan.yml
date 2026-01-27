@@ -23,15 +23,15 @@ jobs:
           sysdig-secure-token: ${{ secrets.SYSDIG_SECURE_TOKEN }}
           sysdig-secure-url: ${{ secrets.SYSDIG_SECURE_URL }}
           stop-on-failed-policy-eval: false
-          # ▼ スキャナーを壊さず完走させ（表を出す）、後で変換するためにJSONを書き出します
-          extra-parameters: --json-scan-result=sysdig-report.json
+          # ▼【重要】extra-parameters は一切不要です。
+          # これを消すことで、Action 標準の表出力と JSON 生成 (scan-result.json) が正しく動きます。
 
       - name: Convert to SARIF
         if: always()
         run: |
           curl -LO https://raw.githubusercontent.com/sysdiglabs/secure-inline-scan-examples/main/github/new-scan-engine/sysdig-to-sarif.py
-          # image_325356.png の usage に基づき、正しい引数（ファイル名のみ）で実行
-          python3 sysdig-to-sarif.py sysdig-report.json > sysdig-results.sarif
+          # Action が自動生成した「scan-result.json」を変換します
+          python3 sysdig-to-sarif.py scan-result.json > sysdig-results.sarif
 
       - name: Upload SARIF report
         uses: github/codeql-action/upload-sarif@v3
