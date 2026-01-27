@@ -2,7 +2,7 @@ name: Sysdig Secure Inline Scan
 
 on: [push, pull_request]
 
-# ▼ ここが重要！GitHub Securityタブに結果を書き込む権限を明示します
+# ▼ ここを「jobs:」と同じ高さ（トップレベル）に配置してください
 permissions:
   contents: read
   security-events: write
@@ -15,25 +15,22 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build Docker image
+        # ファイル名を Dockerfile に変更すれば、ここが通るようになります
         run: docker build -t my-repo/my-image:latest .
 
       - name: Sysdig Secure Inline Scan
-        id: scan
         uses: sysdiglabs/scan-action@v5
         with:
           sysdig-secure-token: ${{ secrets.SYSDIG_SECURE_TOKEN }}
           sysdig-secure-url: ${{ secrets.SYSDIG_SECURE_URL }}
           image-tag: "my-repo/my-image:latest"
-          # スキャン結果をSARIF形式で保存
           output-format: sarif
-          output-path: ./sysdig-results.sarif
-          # 脆弱性があっても、次の「アップロード」ステップへ進むためにtrueにします
+          output-path: sysdig-results.sarif
+          # スキャン結果が悪くても（脆弱性があっても）一旦通して、レポートをアップロードさせる
           ignore-failed-scan: true
 
       - name: Upload SARIF report
-        # ログの推奨に従い v3 を使用します
         uses: github/codeql-action/upload-sarif@v3
-        # スキャンでエラーが出ても、必ず実行してGitHubに報告します
         if: always()
         with:
-          sarif_file: ./sysdig-results.sarif
+          sarif_file: sysdig-results.sarif
