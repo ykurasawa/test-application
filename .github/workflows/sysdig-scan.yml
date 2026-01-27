@@ -1,4 +1,4 @@
-name: Sysdig Secure Inline Scan
+name: Sysdig Secure Inline Scan (New Engine Complete)
 
 on: [push, pull_request]
 
@@ -7,29 +7,34 @@ permissions:
   security-events: write
 
 jobs:
-  build-and-scan:
+  build-scan:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Build Docker image
-        # image_3efed3.png で修正した通り、Dockerfileの名前は大文字です
         run: docker build -t my-repo/my-image:latest .
 
-      - name: Sysdig Secure Inline Scan
+      - name: Scan image
         uses: sysdiglabs/scan-action@v5
         with:
+          image-tag: "my-repo/my-image:latest"
           sysdig-secure-token: ${{ secrets.SYSDIG_SECURE_TOKEN }}
           sysdig-secure-url: ${{ secrets.SYSDIG_SECURE_URL }}
-          image-tag: "my-repo/my-image:latest"
-          # ▼ スキャナーを正常起動させ、表とSARIFを両方出力させるための「新エンジン」用設定
           stop-on-failed-policy-eval: false
-          extra-parameters: --output-format=sarif --output-path=sysdig-results.sarif
+          # ▼ クラッシュを避けるため、JSON出力のみを指定（これで表が復活します）
+          extra-parameters: --json-scan-result=sysdig-report.json
+
+      - name: Convert to SARIF
+        # ▼ あなたが提示したURLのスクリプトを使って変換します
+        if: always()
+        run: |
+          curl -LO https://raw.githubusercontent.com/sysdiglabs/secure-inline-scan-examples/main/github/new-scan-engine/sysdig-to-sarif.py
+          python3 sysdig-to-sarif.py --input-file sysdig-report.json --output-file sysdig-results.sarif --image-name my-repo/my-image:latest
 
       - name: Upload SARIF report
         uses: github/codeql-action/upload-sarif@v3
-        # スキャンの成否に関わらず、ファイルがあれば必ず実行
         if: always()
         with:
           sarif_file: sysdig-results.sarif
