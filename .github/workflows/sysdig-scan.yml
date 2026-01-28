@@ -1,40 +1,72 @@
-name: Sysdig Secure Inline Scan (Final Fix)
+name: Sysdig Secure ECR Pipeline (Gatekeeper Mode)
 
 on: [push, pull_request]
+
+# 環境変数でパラメータを一元管理
+env:
+  AWS_REGION: ap-southeast-2           # あなたのECRリージョン
+  ECR_REPOSITORY: test-application      # ECRリポジトリ名
+  IMAGE_TAG: ${{ github.sha }}         # コミットハッシュをタグにする
 
 permissions:
   contents: read
   security-events: write
 
 jobs:
-  build-scan:
+  build-scan-push:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build Docker image
-        run: docker build -t my-repo/my-image:latest .
+      # 1. AWS 認証
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
+      # 2. Amazon ECR ログイン
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # 3. ビルド（ECRのレジストリURLを使用）
+      - name: Build Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          docker build -t $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} .
+
+      # 4. Sysdig スキャン（ゲートキーパー有効）
       - name: Scan image
         uses: sysdiglabs/scan-action@v5
         with:
-          image-tag: "my-repo/my-image:latest"
+          image-tag: "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}"
           sysdig-secure-token: ${{ secrets.SYSDIG_SECURE_TOKEN }}
           sysdig-secure-url: ${{ secrets.SYSDIG_SECURE_URL }}
-          stop-on-failed-policy-eval: false
-          # ▼【重要】extra-parameters は一切不要です。
-          # これを消すことで、Action 標準の表出力と JSON 生成 (scan-result.json) が正しく動きます。
+          # ▼【重要】Critical等の脆弱性があればジョブを失敗させる
+          stop-on-failed-policy-eval: true
 
+      # 5. SARIF変換（失敗しても実行して証拠を残す）
       - name: Convert to SARIF
-        if: always()
+        if: always() # スキャンが失敗してもレポートは作成する
         run: |
           curl -LO https://raw.githubusercontent.com/sysdiglabs/secure-inline-scan-examples/main/github/new-scan-engine/sysdig-to-sarif.py
-          # Action が自動生成した「scan-result.json」を変換します
           python3 sysdig-to-sarif.py scan-result.json > sysdig-results.sarif
 
+      # 6. Securityタブへの報告（失敗しても実行）
       - name: Upload SARIF report
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: sysdig-results.sarif
+
+      # 7. ECRへのプッシュ（スキャン合格時のみ）
+      - name: Push image to Amazon ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          # スキャンが失敗（stop-on-failed-policy-eval: true）なら、ここは実行されません
+          docker push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
