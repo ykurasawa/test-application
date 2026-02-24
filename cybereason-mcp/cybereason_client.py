@@ -1,10 +1,13 @@
 """
 Cybereason EDR API Client
 Session-based authentication with automatic re-login on session expiry.
+Reference: Cybereason Knowledge Base (nest.cybereason.com)
+           - Retrieve All MalOps: POST /rest/mmng/v2/malops
 """
 
+import json
 import logging
-import os
+import time
 from typing import Any, Optional
 
 import requests
@@ -30,35 +33,36 @@ class CybereasonClient:
         self.password = password
         self.verify_ssl = verify_ssl
         self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            }
-        )
 
     # ------------------------------------------------------------------
     # Authentication
     # ------------------------------------------------------------------
 
     def login(self) -> None:
-        """Authenticate and store the session cookie."""
-        url = f"{self.base_url}/rest/login"
-        payload = {
+        """
+        Authenticate and store the session cookie.
+        Based on official Cybereason API documentation Python sample:
+          session.post(login_url, data={"username":..., "password":...})
+        """
+        self.session = requests.Session()
+        login_url = f"{self.base_url}/login.html"
+        data = {
             "username": self.username,
             "password": self.password,
         }
-        # Cybereason login uses form-encoded data, not JSON
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
         resp = self.session.post(
-            url,
-            data=payload,
-            headers=headers,
+            login_url,
+            data=data,
             verify=self.verify_ssl,
             timeout=30,
         )
         resp.raise_for_status()
-        logger.info("Cybereason login successful")
+        if not self.session.cookies.get("JSESSIONID"):
+            raise RuntimeError("Login succeeded but no JSESSIONID cookie received.")
+        logger.info(
+            "Cybereason login successful, JSESSIONID: %s",
+            self.session.cookies.get("JSESSIONID"),
+        )
 
     def _request(
         self,
@@ -82,6 +86,60 @@ class CybereasonClient:
         return resp
 
     # ------------------------------------------------------------------
+    # Internal helper: /rest/mmng/v2/malops
+    # ------------------------------------------------------------------
+
+    def _query_malops(
+        self,
+        search: Optional[dict] = None,
+        page_size: int = 25,
+        offset: int = 0,
+        malop_filter: Optional[dict] = None,
+        sort_field: str = "lastUpdateTime",
+        sort_order: str = "desc",
+    ) -> dict[str, Any]:
+        """
+        POST /rest/mmng/v2/malops の共通ラッパー。
+
+        Reference: "Retrieve All MalOps" - Cybereason Knowledge Base
+          Endpoint URL : https://<server>/rest/mmng/v2/malops
+          Action       : POST
+          Supported    : version 23.1.152 and higher (new Data Platform)
+        """
+        payload: dict[str, Any] = {
+            "search": search or {},
+            "range": {
+                "from": 0,
+                "to": int(time.time() * 1000),
+            },
+            "pagination": {
+                "pageSize": page_size,
+                "offset": offset,
+            },
+            "federation": {
+                "groups": [],
+            },
+            "filter": {
+                "malop": malop_filter or {},
+            },
+            "sort": [
+                {
+                    "field": sort_field,
+                    "order": sort_order,
+                }
+            ],
+        }
+
+        headers = {"Content-Type": "application/json"}
+        resp = self._request(
+            "POST",
+            "/rest/mmng/v2/malops",
+            data=json.dumps(payload),
+            headers=headers,
+        )
+        return resp.json()
+
+    # ------------------------------------------------------------------
     # Tool: get_alerts
     # ------------------------------------------------------------------
 
@@ -91,52 +149,33 @@ class CybereasonClient:
         limit: int = 25,
     ) -> dict[str, Any]:
         """
-        Retrieve unresolved Malops (alerts) from Cybereason.
+        Retrieve MalOps via POST /rest/mmng/v2/malops.
 
         Parameters
         ----------
-        status_filter:
-            List of malop statuses to filter by.
-            Defaults to ["TODO"] (未対応).
-        limit:
-            Maximum number of malops to return (default 25).
+        status_filter : list[str]
+            Filter by investigationStatus. Possible values:
+            "TODO", "Pending", "UnderInvestigation", "OnHold", "Closed", "Reopened"
+            Defaults to ["TODO"].
+        limit : int
+            Number of MalOps to return per page (pageSize).
+
+        Returns
+        -------
+        dict
+            Raw API response. Key fields:
+              data.data       - list of MalOp objects
+              data.totalHits  - total number of matching MalOps
+              data.pageSize   - page size used
+              data.pages      - number of pages
         """
         if status_filter is None:
             status_filter = ["TODO"]
 
-        payload: dict[str, Any] = {
-            "totalResultLimit": limit,
-            "perGroupLimit": limit,
-            "perFeatureLimit": limit,
-            "templateContext": "OVERVIEW",
-            "queryPath": [
-                {
-                    "requestedType": "MalopProcess",
-                    "filters": [
-                        {
-                            "facetName": "malopActivityType",
-                            "values": ["MALICIOUS_ACTIVITY"],
-                        }
-                    ],
-                    "connectionFeature": {
-                        "elementInstanceType": "MalopProcess",
-                        "featureName": "suspects",
-                    },
-                }
-            ],
-        }
-
-        if status_filter:
-            payload["queryPath"][0]["filters"].append(  # type: ignore[index]
-                {"facetName": "status", "values": status_filter}
-            )
-
-        resp = self._request(
-            "POST",
-            "/rest/crimes/unified",
-            json=payload,
+        return self._query_malops(
+            malop_filter={"investigationStatus": status_filter},
+            page_size=limit,
         )
-        return resp.json()
 
     # ------------------------------------------------------------------
     # Tool: get_malop_details
@@ -145,22 +184,41 @@ class CybereasonClient:
     def get_malop_details(self, malop_id: str) -> dict[str, Any]:
         """
         Retrieve detailed information for a specific Malop.
+        Uses POST /rest/mmng/v2/malops with search.malop.guid filter.
 
-        Parameters
-        ----------
-        malop_id:
-            The GUID of the Malop (e.g. "11.2345678901234567890").
+        Returns
+        -------
+        dict
+            Single MalOp object. Key fields (PDFマニュアル Response Success Schema より):
+              guid                  - MalOp の一意識別子
+              displayName           - MalOp の表示名 (通常はルート原因の名前)
+              creationTime          - 生成時刻 (ms)
+              lastUpdateTime        - 最終更新時刻 (ms)
+              status                - Active / Remediated / Closed / Excluded
+              investigationStatus   - Pending / UnderInvestigation / OnHold / Closed 等
+              severity              - High / Medium / Low
+              priority              - HIGH / MEDIUM / LOW / null
+              detectionEngines      - 検出エンジン (EDR / AntiVirus 等)
+              detectionTypes        - 検出種別
+              detectionType         - MalOp 種別 (CUSTOM_RULE / RANSOMWARE 等)
+              mitreTactics          - MITRE ATT&CK タクティクス
+              iocs                  - IOC 種別 (File / Process / IpAddress 等)
+              escalated             - エスカレーション済みフラグ
+              isEdr                 - AI Hunt MalOp フラグ
+              rootCauseElementType  - ルート原因の Element 種別
+              machines              - 関連マシン一覧
+              users                 - 関連ユーザー一覧
         """
-        payload = {
-            "malopGuid": malop_id,
-            "requestedType": "MalopProcess",
-        }
-        resp = self._request(
-            "POST",
-            "/rest/crimes/get-details",
-            json=payload,
+        data = self._query_malops(
+            search={"malop": {"guid": malop_id}},
+            page_size=1,
         )
-        return resp.json()
+
+        malops: list[dict] = data.get("data", {}).get("data", [])
+        if not malops:
+            raise ValueError(f"MalOp not found: {malop_id}")
+
+        return malops[0]
 
     # ------------------------------------------------------------------
     # Tool: get_affected_machines
@@ -168,46 +226,25 @@ class CybereasonClient:
 
     def get_affected_machines(self, malop_id: str) -> dict[str, Any]:
         """
-        List machines affected by a specific Malop.
+        List machines and users affected by a specific Malop.
+        Reuses get_malop_details (POST /rest/mmng/v2/malops) and extracts
+        the machines / users fields.
 
-        Parameters
-        ----------
-        malop_id:
-            The GUID of the Malop.
+        Returns
+        -------
+        dict with keys:
+          malopGuid - 検索に使用した MalOp GUID
+          machines  - 関連マシン一覧 (guid / displayName / connected /
+                      isolated / osType / lastConnected)
+          users     - 関連ユーザー一覧 (guid / displayName / admin /
+                      domainUser / localSystem)
         """
-        payload: dict[str, Any] = {
-            "queryPath": [
-                {
-                    "requestedType": "Machine",
-                    "filters": [],
-                    "connectionFeature": {
-                        "elementInstanceType": "MalopProcess",
-                        "featureName": "affectedMachines",
-                    },
-                    "isResult": True,
-                },
-                {
-                    "requestedType": "MalopProcess",
-                    "filters": [
-                        {
-                            "facetName": "guid",
-                            "values": [malop_id],
-                        }
-                    ],
-                },
-            ],
-            "totalResultLimit": 1000,
-            "perGroupLimit": 100,
-            "perFeatureLimit": 100,
-            "templateContext": "SPECIFIC",
-            "queryTimeout": 120000,
+        malop = self.get_malop_details(malop_id)
+        return {
+            "malopGuid": malop_id,
+            "machines": malop.get("machines", []),
+            "users": malop.get("users", []),
         }
-        resp = self._request(
-            "POST",
-            "/rest/crimes/unified",
-            json=payload,
-        )
-        return resp.json()
 
     # ------------------------------------------------------------------
     # Tool: update_alert_status
@@ -221,16 +258,21 @@ class CybereasonClient:
     ) -> dict[str, Any]:
         """
         Update the status of a Malop.
+        Uses POST /rest/mmng/v2/malops/{malopId}/status
 
         Parameters
         ----------
-        malop_id:
-            The GUID of the Malop.
-        status:
-            New status. One of: TODO, CLOSED, FP (false positive),
-            OPEN, UNREAD.
-        comment:
-            Optional comment to add when updating the status.
+        malop_id : str
+            The GUID of the target MalOp.
+        status : str
+            New status. Possible values:
+            "TODO"    - 未対応
+            "OPEN"    - 対応中
+            "UNREAD"  - 未読
+            "CLOSED"  - クローズ
+            "FP"      - 誤検知 (False Positive)
+        comment : str, optional
+            Comment to attach to the status change.
         """
         valid_statuses = {"TODO", "CLOSED", "FP", "OPEN", "UNREAD"}
         if status not in valid_statuses:
@@ -238,19 +280,17 @@ class CybereasonClient:
                 f"Invalid status '{status}'. Must be one of: {', '.join(sorted(valid_statuses))}"
             )
 
-        payload: dict[str, Any] = {
-            "malopId": malop_id,
-            "newStatus": status,
-        }
+        payload: dict[str, Any] = {"status": status}
         if comment:
             payload["comment"] = comment
 
+        headers = {"Content-Type": "application/json"}
         resp = self._request(
             "POST",
-            "/rest/crimes/update-status",
-            json=payload,
+            f"/rest/mmng/v2/malops/{malop_id}/status",
+            data=json.dumps(payload),
+            headers=headers,
         )
-        # Some Cybereason versions return 200 with an empty body on success
         try:
             return resp.json()
         except ValueError:

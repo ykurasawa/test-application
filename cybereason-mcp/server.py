@@ -14,9 +14,7 @@ from dotenv import load_dotenv
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import (
-    CallToolRequest,
     CallToolResult,
-    ListToolsRequest,
     ListToolsResult,
     TextContent,
     Tool,
@@ -187,14 +185,13 @@ def _json_text(data: Any) -> TextContent:
 
 
 @app.list_tools()
-async def list_tools(_: ListToolsRequest) -> ListToolsResult:  # type: ignore[name-defined]
-    return ListToolsResult(tools=TOOLS)
+async def list_tools() -> list[Tool]:          # ✅ 引数なし
+    return TOOLS
 
 
 @app.call_tool()
-async def call_tool(request: CallToolRequest) -> CallToolResult:  # type: ignore[name-defined]
-    name = request.params.name
-    args: dict[str, Any] = request.params.arguments or {}
+async def call_tool(name: str, arguments: dict) -> list[TextContent]:  # ✅ name + arguments
+    args: dict[str, Any] = arguments or {}
 
     logger.info("ツール呼び出し: %s  引数: %s", name, args)
 
@@ -227,7 +224,7 @@ async def call_tool(request: CallToolRequest) -> CallToolResult:  # type: ignore
         else:
             raise ValueError(f"未知のツール: {name}")
 
-        return CallToolResult(content=[_json_text(result)])
+        return [_json_text(result)]
 
     except Exception as exc:
         logger.exception("ツール '%s' の実行中にエラーが発生しました", name)
@@ -235,10 +232,7 @@ async def call_tool(request: CallToolRequest) -> CallToolResult:  # type: ignore
             "error": type(exc).__name__,
             "message": str(exc),
         }
-        return CallToolResult(
-            content=[_json_text(error_payload)],
-            isError=True,
-        )
+        return [_json_text(error_payload)]
 
 
 # ---------------------------------------------------------------------------
