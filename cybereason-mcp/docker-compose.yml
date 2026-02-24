@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  cybereason-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cybereason-mcp:latest
+    container_name: cybereason-mcp
+    restart: unless-stopped
+
+    # stdio トランスポートを使うため、コンテナを対話モードで起動
+    stdin_open: true
+    tty: false
+
+    env_file:
+      - .env
+
+    environment:
+      # .env の値を上書きしたい場合はここに記述
+      # CYBEREASON_VERIFY_SSL: "false"
+      PYTHONUNBUFFERED: "1"
+
+    # ログ設定
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
