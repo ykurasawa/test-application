@@ -257,40 +257,45 @@ class CybereasonClient:
         comment: Optional[str] = None,
     ) -> dict[str, Any]:
         """
-        Update the status of a Malop.
-        Uses POST /rest/mmng/v2/malops/{malopId}/status
+        Update the investigation status of a Malop.
+        Uses PUT /rest/mmng/v2/malops/{malopGUID}
+
+        Reference: "Update the Malop Investigation Status" - Cybereason Knowledge Base
+          Endpoint URL : https://<server>/rest/mmng/v2/malops/:malopGUID
+          Action       : PUT
+          Supported    : version 21.2.180 and higher (new Data Platform)
 
         Parameters
         ----------
         malop_id : str
             The GUID of the target MalOp.
         status : str
-            New status. Possible values:
-            "TODO"    - 未対応
-            "OPEN"    - 対応中
-            "UNREAD"  - 未読
-            "CLOSED"  - クローズ
-            "FP"      - 誤検知 (False Positive)
+            New investigationStatus. Possible values:
+            "Pending"            - 未対応
+            "UnderInvestigation" - 調査中
+            "OnHold"             - 保留
+            "Closed"             - クローズ
+            "ReOpened"           - 再オープン
         comment : str, optional
-            Comment to attach to the status change.
+            Comment to attach to the status change. (ログ用、APIには送信しない)
         """
-        valid_statuses = {"TODO", "CLOSED", "FP", "OPEN", "UNREAD"}
+        valid_statuses = {"Pending", "UnderInvestigation", "OnHold", "Closed", "ReOpened"}
         if status not in valid_statuses:
             raise ValueError(
                 f"Invalid status '{status}'. Must be one of: {', '.join(sorted(valid_statuses))}"
             )
 
-        payload: dict[str, Any] = {"status": status}
-        if comment:
-            payload["comment"] = comment
+        payload: dict[str, Any] = {"investigationStatus": status}
 
         headers = {"Content-Type": "application/json"}
         resp = self._request(
-            "POST",
-            f"/rest/mmng/v2/malops/{malop_id}/status",
+            "PUT",
+            f"/rest/mmng/v2/malops/{malop_id}",
             data=json.dumps(payload),
             headers=headers,
         )
+        if comment:
+            logger.info("Status update comment: %s", comment)
         try:
             return resp.json()
         except ValueError:

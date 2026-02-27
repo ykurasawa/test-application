@@ -116,8 +116,8 @@ TOOLS: list[Tool] = [
     Tool(
         name="update_alert_status",
         description=(
-            "Malop のステータスを更新します。"
-            " 対応済みクローズや誤検知（FP）マークなどに使用します。"
+            "Malop の調査ステータス（investigationStatus）を更新します。"
+            " 対応済みクローズや調査中への変更などに使用します。"
         ),
         inputSchema={
             "type": "object",
@@ -128,10 +128,11 @@ TOOLS: list[Tool] = [
                 },
                 "status": {
                     "type": "string",
-                    "enum": ["TODO", "OPEN", "UNREAD", "CLOSED", "FP"],
+                    "enum": ["Pending", "UnderInvestigation", "OnHold", "Closed", "ReOpened"],
                     "description": (
-                        "新しいステータス。"
-                        " TODO=未対応, OPEN=対応中, CLOSED=クローズ, FP=誤検知。"
+                        "新しい investigationStatus。"
+                        " Pending=未対応, UnderInvestigation=調査中,"
+                        " OnHold=保留, Closed=クローズ, ReOpened=再オープン。"
                     ),
                 },
                 "comment": {
