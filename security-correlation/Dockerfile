@@ -16,7 +16,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application source
 COPY arcsight_client.py .
-COPY cybereason_client.py .
 COPY correlator.py .
 COPY main.py .
 

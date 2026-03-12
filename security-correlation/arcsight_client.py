@@ -9,16 +9,18 @@ Reference: ArcSight ESM REST Developer's Guide
   - Events: POST /www/manager-service/rest/QueryViewService/getSecurityEvents
 
 Environment variables:
-  ARCSIGHT_URL           Base URL (e.g. https://arcsight.example.com:8443)
-  ARCSIGHT_USERNAME      Login username
-  ARCSIGHT_PASSWORD      Login password
-  ARCSIGHT_VERIFY_SSL    "false" to skip TLS verification (default: true)
+  ARCSIGHT_URL             Base URL (e.g. https://arcsight.example.com:8443)
+  ARCSIGHT_USERNAME        Login username
+  ARCSIGHT_PASSWORD        Login password
+  ARCSIGHT_VERIFY_SSL      "false" to skip TLS verification (default: true)
   ARCSIGHT_QUERY_VIEW_URI  URI of the Query View resource (optional)
+  ARCSIGHT_EDR_VENDOR      deviceVendor value for EDR events (default: Cybereason)
+  ARCSIGHT_EDR_PRODUCT     deviceProduct value for EDR events (optional)
 """
 
+import datetime
 import json
 import logging
-import time
 from typing import Any, Optional
 
 import requests
@@ -44,12 +46,16 @@ class ArcSightClient:
         password: str,
         verify_ssl: bool = True,
         query_view_uri: str = _DEFAULT_QUERY_URI,
+        edr_vendor: str = "Cybereason",
+        edr_product: Optional[str] = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.username = username
         self.password = password
         self.verify_ssl = verify_ssl
         self.query_view_uri = query_view_uri
+        self.edr_vendor = edr_vendor
+        self.edr_product = edr_product
         self.session = requests.Session()
         self._auth_token: Optional[str] = None
 
@@ -146,26 +152,20 @@ class ArcSightClient:
         return resp
 
     # ------------------------------------------------------------------
-    # Security event retrieval
+    # Internal query helper
     # ------------------------------------------------------------------
 
-    def search_events(
+    def _query_events(
         self,
         start_time_ms: int,
         end_time_ms: int,
-        source_address: Optional[str] = None,
-        destination_address: Optional[str] = None,
-        device_hostname: Optional[str] = None,
-        max_results: int = 200,
+        filter_expression: Optional[str],
+        max_results: int,
     ) -> list[dict[str, Any]]:
         """
-        Query security events from ArcSight ESM in a time window.
+        Execute a security event query against ArcSight ESM.
 
         POST /www/manager-service/rest/QueryViewService/getSecurityEvents
-
-        The query is executed against ``self.query_view_uri``.  At least one
-        filter (source IP, destination IP, or hostname) should be supplied to
-        keep the result set manageable.
 
         Parameters
         ----------
@@ -173,14 +173,11 @@ class ArcSightClient:
             Window start in epoch milliseconds.
         end_time_ms : int
             Window end in epoch milliseconds.
-        source_address : str, optional
-            Filter: source IP address (exact match).
-        destination_address : str, optional
-            Filter: destination IP address (exact match).
-        device_hostname : str, optional
-            Filter: device host name (substring match).
+        filter_expression : str or None
+            ArcSight filter expression string (SQL-like).
+            Example: "sourceAddress = '1.2.3.4' OR deviceHostName CONTAINS 'srv01'"
         max_results : int
-            Maximum number of events returned (default 200).
+            Maximum number of events returned.
 
         Returns
         -------
@@ -190,17 +187,6 @@ class ArcSightClient:
             sourceAddress, destinationAddress, deviceHostName,
             deviceProduct, deviceVendor, message.
         """
-        # Build a simple filter expression understood by ArcSight ESM
-        conditions: list[str] = []
-        if source_address:
-            conditions.append(f"sourceAddress = '{source_address}'")
-        if destination_address:
-            conditions.append(f"destinationAddress = '{destination_address}'")
-        if device_hostname:
-            conditions.append(f"deviceHostName CONTAINS '{device_hostname}'")
-
-        filter_expr = " OR ".join(conditions) if conditions else None
-
         payload: dict[str, Any] = {
             "qvs.getSecurityEventsRequest": {
                 "qvs.id": {
@@ -215,10 +201,10 @@ class ArcSightClient:
             }
         }
 
-        if filter_expr:
+        if filter_expression:
             payload["qvs.getSecurityEventsRequest"]["qvs.queryParam"][
                 "qvs.filterExpression"
-            ] = filter_expr
+            ] = filter_expression
 
         headers = {
             "Content-Type": "application/json",
@@ -240,10 +226,127 @@ class ArcSightClient:
         )
         if isinstance(raw, dict):
             raw = [raw]
-        events: list[dict[str, Any]] = raw or []
+        return raw or []
+
+    # ------------------------------------------------------------------
+    # EDR event retrieval (Step 1: seed events)
+    # ------------------------------------------------------------------
+
+    def get_edr_events(
+        self,
+        start_time_ms: int,
+        end_time_ms: int,
+        max_results: int = 200,
+    ) -> list[dict[str, Any]]:
+        """
+        Fetch Cybereason EDR events stored in ArcSight ESM.
+
+        Filters by ``deviceVendor = '<edr_vendor>'`` and optionally
+        ``deviceProduct = '<edr_product>'``.  Both values are set on the
+        client via constructor parameters (``edr_vendor`` / ``edr_product``).
+
+        Parameters
+        ----------
+        start_time_ms : int
+            Lookback window start in epoch milliseconds.
+        end_time_ms : int
+            Lookback window end in epoch milliseconds (typically now).
+        max_results : int
+            Maximum number of EDR events to retrieve.
+
+        Returns
+        -------
+        list[dict]
+            List of ArcSight event objects originating from the EDR sensor.
+            Key fields used downstream:
+              sourceAddress      – source IP of the EDR alert
+              destinationAddress – destination IP of the EDR alert
+              deviceHostName     – hostname where the EDR agent is installed
+              endTime            – event timestamp (epoch ms)
+              name / message     – alert description
+              severity           – alert severity
+        """
+        conditions = [f"deviceVendor = '{self.edr_vendor}'"]
+        if self.edr_product:
+            conditions.append(f"deviceProduct = '{self.edr_product}'")
+        filter_expr = " AND ".join(conditions)
 
         logger.info(
-            "ArcSight search returned %d events "
+            "Fetching EDR events from ArcSight (vendor=%s, product=%s, "
+            "window %s – %s, max=%d)",
+            self.edr_vendor,
+            self.edr_product or "*",
+            _ms_to_iso(start_time_ms),
+            _ms_to_iso(end_time_ms),
+            max_results,
+        )
+
+        events = self._query_events(
+            start_time_ms=start_time_ms,
+            end_time_ms=end_time_ms,
+            filter_expression=filter_expr,
+            max_results=max_results,
+        )
+        logger.info("Fetched %d EDR events from ArcSight", len(events))
+        return events
+
+    # ------------------------------------------------------------------
+    # Correlated event retrieval (Step 2: context events)
+    # ------------------------------------------------------------------
+
+    def search_events(
+        self,
+        start_time_ms: int,
+        end_time_ms: int,
+        source_address: Optional[str] = None,
+        destination_address: Optional[str] = None,
+        device_hostname: Optional[str] = None,
+        max_results: int = 200,
+    ) -> list[dict[str, Any]]:
+        """
+        Query all security events in a time window, filtered by at least one
+        of: source IP, destination IP, or device hostname.
+
+        Used in the correlation phase to retrieve context events surrounding
+        each EDR alert.
+
+        Parameters
+        ----------
+        start_time_ms : int
+            Window start in epoch milliseconds.
+        end_time_ms : int
+            Window end in epoch milliseconds.
+        source_address : str, optional
+            Filter: source IP address (exact match).
+        destination_address : str, optional
+            Filter: destination IP address (exact match).
+        device_hostname : str, optional
+            Filter: device host name (substring match).
+        max_results : int
+            Maximum number of events returned (default 200).
+
+        Returns
+        -------
+        list[dict]
+        """
+        conditions: list[str] = []
+        if source_address:
+            conditions.append(f"sourceAddress = '{source_address}'")
+        if destination_address:
+            conditions.append(f"destinationAddress = '{destination_address}'")
+        if device_hostname:
+            conditions.append(f"deviceHostName CONTAINS '{device_hostname}'")
+
+        filter_expr = " OR ".join(conditions) if conditions else None
+
+        events = self._query_events(
+            start_time_ms=start_time_ms,
+            end_time_ms=end_time_ms,
+            filter_expression=filter_expr,
+            max_results=max_results,
+        )
+        logger.info(
+            "ArcSight context search returned %d events "
             "(window %s – %s, src=%s, dst=%s, host=%s)",
             len(events),
             _ms_to_iso(start_time_ms),
@@ -254,22 +357,6 @@ class ArcSightClient:
         )
         return events
 
-    def get_event_by_id(self, event_id: str) -> Optional[dict[str, Any]]:
-        """
-        Retrieve a single event by its ArcSight event ID.
-        GET /www/manager-service/rest/SecurityEventService/getSecurityEventDetails
-        """
-        params = {"eventId": event_id}
-        resp = self._request(
-            "GET",
-            "/www/manager-service/rest/SecurityEventService/getSecurityEventDetails",
-            params=params,
-        )
-        data = resp.json()
-        return data.get("ses.getSecurityEventDetailsResponse", {}).get(
-            "ses.return"
-        )
-
 
 # ------------------------------------------------------------------
 # Utility
@@ -278,7 +365,5 @@ class ArcSightClient:
 
 def _ms_to_iso(ms: int) -> str:
     """Convert epoch milliseconds to ISO-8601 string (UTC)."""
-    import datetime
-
     dt = datetime.datetime.fromtimestamp(ms / 1000.0, tz=datetime.timezone.utc)
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
