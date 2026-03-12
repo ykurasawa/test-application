@@ -1,0 +1,41 @@
+version: "3.9"
+
+services:
+  correlation-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: security-correlation-app:latest
+    container_name: security-correlation-app
+
+    # Mount a local directory to retrieve the JSON report after execution
+    volumes:
+      - ./reports:/app/reports
+
+    # All sensitive values should be set in a .env file (see .env.example)
+    env_file:
+      - .env
+
+    environment:
+      # ArcSight ESM connection
+      ARCSIGHT_URL: ${ARCSIGHT_URL}
+      ARCSIGHT_USERNAME: ${ARCSIGHT_USERNAME}
+      ARCSIGHT_PASSWORD: ${ARCSIGHT_PASSWORD}
+      ARCSIGHT_VERIFY_SSL: ${ARCSIGHT_VERIFY_SSL:-true}
+      ARCSIGHT_QUERY_VIEW_URI: ${ARCSIGHT_QUERY_VIEW_URI:-}
+
+      # Cybereason EDR connection
+      CYBEREASON_URL: ${CYBEREASON_URL}
+      CYBEREASON_USERNAME: ${CYBEREASON_USERNAME}
+      CYBEREASON_PASSWORD: ${CYBEREASON_PASSWORD}
+      CYBEREASON_VERIFY_SSL: ${CYBEREASON_VERIFY_SSL:-true}
+
+      # Correlation settings
+      CORRELATION_STATUS_FILTER: ${CORRELATION_STATUS_FILTER:-TODO}
+      CORRELATION_MALOP_LIMIT: ${CORRELATION_MALOP_LIMIT:-25}
+      CORRELATION_WINDOW_MIN: ${CORRELATION_WINDOW_MIN:-15}
+      CORRELATION_OUTPUT_FILE: /app/reports/correlation_report.json
+      CORRELATION_ENRICH_IPS: ${CORRELATION_ENRICH_IPS:-true}
+
+    # The container runs once and exits; use restart: "no" (default)
+    restart: "no"
